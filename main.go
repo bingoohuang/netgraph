@@ -6,18 +6,19 @@ import (
 	"github.com/ga0/netgraph/pkg/httpstream"
 	"io/ioutil"
 	"log"
+	"os"
 )
 
 func main() {
-	input := flag.String("i", "any", "Device to capture, or pcap filename to open")
-	bpf := flag.String("bpf", "tcp port 80", "Set berkeley packet filter")
-	outHTTP := flag.String("o", "", "Write HTTP request/response to file")
-	outPcap := flag.String("o.pcap", "", "Write captured packet to a pcap file")
-	port := flag.Int("p", 9000, "Web server port. If the port is set to '0', the server will not run.")
-	saveEvent := flag.Bool("s", false, "Save HTTP event in server")
-	verbose := flag.Bool("v", true, "Show more message")
-
-	flag.Parse()
+	f := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	input := f.String("i", "any", "Device to capture, or pcap filename to open")
+	bpf := f.String("bpf", "tcp port 80", "Set berkeley packet filter")
+	outHTTP := f.String("o", "", "Write HTTP request/response to file")
+	outPcap := f.String("o.pcap", "", "Write captured packet to a pcap file")
+	port := f.Int("p", 9000, "Web server port. If the port is set to '0', the server will not run.")
+	saveEvent := f.Bool("s", false, "Save HTTP event in server")
+	verbose := f.Bool("v", true, "Show more message")
+	f.Parse(os.Args[1:])
 
 	if !*verbose {
 		log.SetOutput(ioutil.Discard)
