@@ -8,42 +8,37 @@ import (
 	"log"
 )
 
-var device = flag.String("i", "", "Device to capture, auto select one if no device provided, or pcap filename to open")
-var bpf = flag.String("bpf", "tcp port 80", "Set berkeley packet filter")
+func main() {
+	input := flag.String("i", "any", "Device to capture, or pcap filename to open")
+	bpf := flag.String("bpf", "tcp port 80", "Set berkeley packet filter")
+	outHTTP := flag.String("o", "", "Write HTTP request/response to file")
+	outPcap := flag.String("o.pcap", "", "Write captured packet to a pcap file")
+	port := flag.Int("p", 9000, "Web server port. If the port is set to '0', the server will not run.")
+	saveEvent := flag.Bool("s", false, "Save HTTP event in server")
+	verbose := flag.Bool("v", true, "Show more message")
 
-var outputHTTP = flag.String("o", "", "Write HTTP request/response to file")
-var outputPcap = flag.String("o.pcap", "", "Write captured packet to a pcap file")
-
-var bindingPort = flag.Int("p", 9000, "Web server port. If the port is set to '0', the server will not run.")
-var saveEvent = flag.Bool("s", false, "Save HTTP event in server")
-
-var verbose = flag.Bool("v", true, "Show more message")
-
-func init() {
 	flag.Parse()
 
 	if !*verbose {
 		log.SetOutput(ioutil.Discard)
 	}
-}
 
-func main() {
-	source, err := httpstream.NewPacketSource(*device, *bpf)
+	source, err := httpstream.NewPacketSource(*input, *bpf)
 	if err != nil {
 		panic(err)
 	}
 
 	eventChan := make(chan interface{}, 1024)
-	go httpstream.Run(source, *outputPcap, eventChan)
+	go httpstream.Run(source, *outPcap, eventChan)
 
-	handlers := initEventHandlers(*bindingPort, *outputHTTP)
+	handlers := initEventHandlers(*port, *outHTTP, *saveEvent)
 	runEventHandler(handlers, eventChan)
 }
 
-func initEventHandlers(bindingPort int, outputHTTPFile string) (handlers []httpstream.EventHandler) {
+func initEventHandlers(bindingPort int, outputHTTPFile string, saveEvent bool) (handlers []httpstream.EventHandler) {
 	if bindingPort > 0 {
 		addr := fmt.Sprintf(":%d", bindingPort)
-		handlers = append(handlers, NewNGServer(addr, *saveEvent))
+		handlers = append(handlers, NewNGServer(addr, saveEvent))
 	}
 
 	if outputHTTPFile != "" {

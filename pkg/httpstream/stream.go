@@ -164,7 +164,7 @@ func (s *httpStream) parseChunked() (body []byte, err error) {
 
 func parseContentInfo(hs []Header) (contentLen int, contentEncoding, contentType string, chunked bool, err error) {
 	for _, h := range hs {
-		switch lowerName := strings.ToLower(h.Name); lowerName {
+		switch strings.ToLower(h.Name) {
 		case "content-length":
 			if contentLen, err = strconv.Atoi(h.Value); err != nil {
 				return 0, "", "", false,
