@@ -46,7 +46,7 @@ type ResponseEvent struct {
 	ClientAddr string
 	ServerAddr string
 	Version    string
-	Code       int
+	Code       string
 	Reason     string
 	Headers    []Header
 	Body       []byte
@@ -67,11 +67,12 @@ func newPair(seq uint, eventChan chan<- interface{}) *pair {
 	return &pair{connSeq: seq, eventChan: eventChan, idChan: make(chan int, 10000)}
 }
 
-func (p *pair) runRsp(stream *httpStream) {
+func (p *pair) run(stream *httpStream) {
 	defer close(stream.reader.stopCh)
 
+	dir := DirectionUnknown
 	for {
-		err := p.handleResponseTransaction(stream)
+		err := p.handleTransaction(&dir, stream)
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			log.Printf("EOF %s", stream.key.String())
 			return // We must read until we see an EOF... very important!
@@ -81,24 +82,8 @@ func (p *pair) runRsp(stream *httpStream) {
 		}
 	}
 }
-func (p *pair) runReq(stream *httpStream) {
-	defer close(stream.reader.stopCh)
 
-	for {
-		err := p.handleRequestTransaction(stream)
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Printf("EOF %s", stream.key.String())
-			return // We must read until we see an EOF... very important!
-		} else if err != nil {
-			log.Printf("E! Reading stream %s, error: %v", stream.key.String(), err)
-			continue
-		}
-
-	}
-}
-
-func (p *pair) handleRequestTransaction(s *httpStream) error {
-	method, uri, version, _ := s.parseRequestLine()
+func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStream) error {
 	reqStart := s.reader.lastSeen
 	reqHeaders, err := s.parseHeaders()
 	if err != nil {
@@ -135,12 +120,21 @@ func (p *pair) handleRequestTransaction(s *httpStream) error {
 	return nil
 }
 
-func (p *pair) handleResponseTransaction(stream *httpStream) error {
-	respVersion, code, reason, err := stream.parseResponseLine()
+func (p *pair) handleTransaction(dir *Direction, stream *httpStream) error {
+	direction, p1, p2, p3, err := stream.parseFirstLine(*dir)
 	if err != nil {
 		return err
 	}
+	*dir = direction
 
+	if direction == DirectionRequest {
+		return p.handleRequestTransaction(p1, p2, p3, stream)
+	}
+
+	return p.handleResponseTransaction(p1, p2, p3, stream)
+}
+
+func (p *pair) handleResponseTransaction(respVersion, code, reason string, stream *httpStream) error {
 	respStart := stream.reader.lastSeen
 	respHeaders, err := stream.parseHeaders()
 	if err != nil {
@@ -194,7 +188,7 @@ func (r RequestEvent) WriteTo(out io.Writer) (n int64, err error) {
 func (r ResponseEvent) WriteTo(out io.Writer) (n int64, err error) {
 	n += fp(out, "[%s] #%d Response %s<-%s\r\n",
 		r.Start.Format("2006-01-02 15:04:05.000"), r.StreamSeq, r.ClientAddr, r.ServerAddr)
-	n += fp(out, "%s %d %s\r\n", r.Version, r.Code, r.Reason)
+	n += fp(out, "%s %s %s\r\n", r.Version, r.Code, r.Reason)
 	for _, h := range r.Headers {
 		n += fp(out, "%s: %s\r\n", h.Name, h.Value)
 	}

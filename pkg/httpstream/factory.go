@@ -38,19 +38,22 @@ func (f *Factory) New(netFlow, tcpFlow gopacket.Flow) tcpassembly.Stream {
 	revkey := streamKey{net: netFlow.Reverse(), tcp: tcpFlow.Reverse()}
 	if p, ok := f.uniStreams[revkey]; ok {
 		delete(f.uniStreams, revkey)
-		go p.runRsp(stream)
-	} else {
-		p = newPair(f.seq, f.eventChan)
-		f.uniStreams[key] = p
-		f.seq++
-		f.wg.Add(1)
-		go func() {
-			atomic.AddInt32(&f.runningStream, 1)
-			defer atomic.AddInt32(&f.runningStream, -1)
-			defer f.wg.Done()
-
-			p.runReq(stream)
-		}()
+		go p.run(stream)
+		return stream
 	}
+
+	p := newPair(f.seq, f.eventChan)
+	f.uniStreams[key] = p
+	f.seq++
+	f.wg.Add(1)
+	go func() {
+		atomic.AddInt32(&f.runningStream, 1)
+		defer atomic.AddInt32(&f.runningStream, -1)
+		defer f.wg.Done()
+		defer delete(f.uniStreams, key)
+
+		p.run(stream)
+	}()
+
 	return stream
 }

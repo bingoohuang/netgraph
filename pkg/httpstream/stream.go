@@ -71,40 +71,42 @@ func (s *httpStream) ReassemblyComplete() {
 	close(s.reader.src)
 }
 
-var httpRequestFirstLine = regexp.MustCompile(`([A-Z]+) (.+) (HTTP/.+)\r\n`)
+var httpRequestFirstLine = regexp.MustCompile(`^([A-Z]+) (.+) (HTTP/.+)\r\n`)
+var httpResponseFirstLine = regexp.MustCompile(`^(HTTP/.+) (\d{3}) (.+)\r\n`)
 
-func (s *httpStream) parseRequestLine() (method, uri, version string, err error) {
+type Direction int
+
+const (
+	DirectionUnknown Direction = iota
+	DirectionRequest
+	DirectionResponse
+)
+
+func (s *httpStream) parseFirstLine(initDir Direction) (dir Direction, p1, p2, p3 string, err error) {
 	b, err := s.reader.ReadUntil([]byte("\r\n"))
 	if err != nil {
-		return "", "", "", fmt.Errorf("read request line, %w", err)
+		return DirectionUnknown, "", "", "", fmt.Errorf("read first line, %w", err)
 	}
 
-	r := httpRequestFirstLine.FindStringSubmatch(string(b))
-	if len(r) != 4 {
-		return "", "", "", fmt.Errorf("bad HTTP Request: %s", b)
+	line := string(b)
+	switch initDir {
+	case DirectionUnknown:
+		if r := httpResponseFirstLine.FindStringSubmatch(line); len(r) == 4 {
+			return DirectionResponse, r[1], r[2], r[3], nil
+		}
+		if r := httpRequestFirstLine.FindStringSubmatch(line); len(r) == 4 {
+			return DirectionRequest, r[1], r[2], r[3], nil
+		}
+	case DirectionRequest:
+		if r := httpRequestFirstLine.FindStringSubmatch(line); len(r) == 4 {
+			return DirectionRequest, r[1], r[2], r[3], nil
+		}
+	case DirectionResponse:
+		if r := httpResponseFirstLine.FindStringSubmatch(line); len(r) == 4 {
+			return DirectionResponse, r[1], r[2], r[3], nil
+		}
 	}
-
-	return r[1], r[2], r[3], nil
-}
-
-var httpResponseFirstLine = regexp.MustCompile(`(HTTP/.+) (\d{3}) (.+)\r\n`)
-
-func (s *httpStream) parseResponseLine() (version string, code int, reason string, err error) {
-	b, err := s.reader.ReadUntil([]byte("\r\n"))
-	if err != nil {
-		return "", 0, "", fmt.Errorf("read response line, %w", err)
-	}
-
-	r := httpResponseFirstLine.FindStringSubmatch(string(b))
-	if len(r) != 4 {
-		return "", 0, "", fmt.Errorf("bad HTTP Response: %s", b)
-	}
-
-	code, err = strconv.Atoi(r[2])
-	if err != nil {
-		return "", 0, "", fmt.Errorf("bad HTTP Response: %s, %w", b, err)
-	}
-	return r[1], code, r[3], nil
+	return DirectionUnknown, "", "", "", fmt.Errorf("bad HTTP first line: %s", line)
 }
 
 func (s *httpStream) parseHeaders() (headers []Header, err error) {
