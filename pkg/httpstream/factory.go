@@ -32,29 +32,25 @@ func (f *Factory) RunningStreamCount() int32 { return atomic.LoadInt32(&f.runnin
 
 // New creates a Factory.
 func (f *Factory) New(netFlow, tcpFlow gopacket.Flow) tcpassembly.Stream {
+	key := streamKey{net: netFlow, tcp: tcpFlow}
+	stream := newHTTPStream(key)
+
 	revkey := streamKey{net: netFlow.Reverse(), tcp: tcpFlow.Reverse()}
 	if p, ok := f.uniStreams[revkey]; ok {
 		delete(f.uniStreams, revkey)
-		p.rspStream = newHTTPStream(streamKey{netFlow, tcpFlow})
-		go p.runRsp()
-		return p.rspStream
+		go p.runRsp(stream)
+	} else {
+		p = newPair(f.seq, f.eventChan)
+		f.uniStreams[key] = p
+		f.seq++
+		f.wg.Add(1)
+		go func() {
+			atomic.AddInt32(&f.runningStream, 1)
+			defer atomic.AddInt32(&f.runningStream, -1)
+			defer f.wg.Done()
+
+			p.runReq(stream)
+		}()
 	}
-
-	p := newPair(f.seq, f.eventChan)
-	key := streamKey{net: netFlow, tcp: tcpFlow}
-	p.reqStream = newHTTPStream(key)
-	f.uniStreams[key] = p
-	f.seq++
-	f.wg.Add(1)
-	go f.runReq(p)
-	return p.reqStream
-}
-
-func (f *Factory) runReq(pair *pair) {
-	atomic.AddInt32(&f.runningStream, 1)
-
-	defer f.wg.Done()
-	defer func() { atomic.AddInt32(&f.runningStream, -1) }()
-
-	pair.runReq()
+	return stream
 }

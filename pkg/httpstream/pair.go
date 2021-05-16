@@ -54,11 +54,8 @@ type ResponseEvent struct {
 
 // pair is Bi-direction HTTP stream pair.
 type pair struct {
-	reqStream, rspStream *httpStream
-
-	requestSeq uint
-	connSeq    uint
-	eventChan  chan<- interface{}
+	connSeq   uint
+	eventChan chan<- interface{}
 
 	method, clientAddr, serverAddr string
 
@@ -70,30 +67,11 @@ func newPair(seq uint, eventChan chan<- interface{}) *pair {
 	return &pair{connSeq: seq, eventChan: eventChan, idChan: make(chan int, 10000)}
 }
 
-func (p *pair) runReq() {
-	stream := p.reqStream
+func (p *pair) runRsp(stream *httpStream) {
 	defer close(stream.reader.stopCh)
 
 	for {
-		err := p.handleRequestTransaction()
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Printf("EOF %s", stream.key.String())
-			return // We must read until we see an EOF... very important!
-		} else if err != nil {
-			log.Printf("E! Reading stream %s, error: %v", stream.key.String(), err)
-			continue
-		}
-
-		p.requestSeq++
-	}
-}
-
-func (p *pair) runRsp() {
-	stream := p.rspStream
-	defer close(stream.reader.stopCh)
-
-	for {
-		err := p.handleResponseTransaction()
+		err := p.handleResponseTransaction(stream)
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			log.Printf("EOF %s", stream.key.String())
 			return // We must read until we see an EOF... very important!
@@ -103,20 +81,34 @@ func (p *pair) runRsp() {
 		}
 	}
 }
+func (p *pair) runReq(stream *httpStream) {
+	defer close(stream.reader.stopCh)
 
-func (p *pair) handleRequestTransaction() error {
-	up := p.reqStream
-	method, uri, version, _ := up.parseRequestLine()
-	reqStart := up.reader.lastSeen
-	reqHeaders, err := up.parseHeaders()
+	for {
+		err := p.handleRequestTransaction(stream)
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			log.Printf("EOF %s", stream.key.String())
+			return // We must read until we see an EOF... very important!
+		} else if err != nil {
+			log.Printf("E! Reading stream %s, error: %v", stream.key.String(), err)
+			continue
+		}
+
+	}
+}
+
+func (p *pair) handleRequestTransaction(s *httpStream) error {
+	method, uri, version, _ := s.parseRequestLine()
+	reqStart := s.reader.lastSeen
+	reqHeaders, err := s.parseHeaders()
 	if err != nil {
 		return err
 	}
 
-	p.clientAddr = up.key.net.Src().String() + ":" + up.key.tcp.Src().String()
-	p.serverAddr = up.key.net.Dst().String() + ":" + up.key.tcp.Dst().String()
+	p.clientAddr = s.key.net.Src().String() + ":" + s.key.tcp.Src().String()
+	p.serverAddr = s.key.net.Dst().String() + ":" + s.key.tcp.Dst().String()
 
-	reqBody, err := up.parseBody(method, reqHeaders, true)
+	reqBody, err := s.parseBody(method, reqHeaders, true)
 	if err != nil {
 		return err
 	}
@@ -136,26 +128,25 @@ func (p *pair) handleRequestTransaction() error {
 			Type:      "HTTPRequest",
 			StreamSeq: p.connSeq,
 			Start:     reqStart,
-			End:       up.reader.lastSeen,
+			End:       s.reader.lastSeen,
 			ID:        p.id,
 		},
 	}
 	return nil
 }
 
-func (p *pair) handleResponseTransaction() error {
-	down := p.rspStream
-	respVersion, code, reason, err := down.parseResponseLine()
+func (p *pair) handleResponseTransaction(stream *httpStream) error {
+	respVersion, code, reason, err := stream.parseResponseLine()
 	if err != nil {
 		return err
 	}
 
-	respStart := down.reader.lastSeen
-	respHeaders, err := down.parseHeaders()
+	respStart := stream.reader.lastSeen
+	respHeaders, err := stream.parseHeaders()
 	if err != nil {
 		return err
 	}
-	respBody, err := down.parseBody(p.method, respHeaders, false)
+	respBody, err := stream.parseBody(p.method, respHeaders, false)
 	if err != nil {
 		return err
 	}
@@ -171,7 +162,7 @@ func (p *pair) handleResponseTransaction() error {
 			Type:      "HTTPResponse",
 			StreamSeq: p.connSeq,
 			Start:     respStart,
-			End:       down.reader.lastSeen,
+			End:       stream.reader.lastSeen,
 			ID:        <-p.idChan,
 		},
 	}
