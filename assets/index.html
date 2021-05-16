@@ -35,6 +35,7 @@ Reverse<input type="checkbox" ng-model="reverse"/>
         <thead>
         <tr>
             <th width="5%">Method</th>
+            <th width="15%">Src->Dst</th>
             <th width="15%">Host</th>
             <th>URI</th>
             <th width="5%">Code</th>
@@ -46,6 +47,7 @@ Reverse<input type="checkbox" ng-model="reverse"/>
         <tr ng-repeat="req in reqs | reqFilter:filterType:pattern | orderBy:order:reverse"
             ng-click="showDetail($event, req)">
             <td>{{ req.Method }}</td>
+            <td style="text-align:center">{{ req.ClientAddr }}->{{ req.ServerAddr }}</td>
             <td style="text-align:center">{{ req.Host }}</td>
             <td><a href="http://{{getHost(req)}}{{req.URI}}" target="_blank">{{ req.URI }}</a></td>
             <td style="text-align:center">{{ req.Response.Code }}</td>
