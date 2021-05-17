@@ -100,7 +100,7 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 
 	p.method = method
 	p.id++
-	p.idChan <- p.id
+	TryPut(p.idChan, p.id)
 	p.eventChan <- RequestEvent{
 		ClientAddr: p.clientAddr,
 		ServerAddr: p.serverAddr,
@@ -118,6 +118,29 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 		},
 	}
 	return nil
+}
+
+func TryGetValue(c chan int) int {
+	v, _ := TryGet(c)
+	return v
+}
+
+func TryGet(c chan int) (int, bool) {
+	select {
+	case v := <-c:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+func TryPut(c chan int, v int) bool {
+	select {
+	case c <- v:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *pair) handleTransaction(dir *Direction, stream *httpStream) error {
@@ -157,7 +180,7 @@ func (p *pair) handleResponseTransaction(respVersion, code, reason string, strea
 			StreamSeq: p.connSeq,
 			Start:     respStart,
 			End:       stream.reader.lastSeen,
-			ID:        <-p.idChan,
+			ID:        TryGetValue(p.idChan),
 		},
 	}
 

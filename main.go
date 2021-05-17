@@ -18,7 +18,7 @@ func main() {
 	port := f.Int("p", 9000, "Web server port. If the port is set to '0', the server will not run.")
 	saveEvent := f.Bool("s", false, "Save HTTP event in server")
 	verbose := f.Bool("v", true, "Show more message")
-	f.Parse(os.Args[1:])
+	_ = f.Parse(os.Args[1:])
 
 	if !*verbose {
 		log.SetOutput(ioutil.Discard)
