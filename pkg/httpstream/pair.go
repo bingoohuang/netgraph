@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -67,7 +68,8 @@ func newPair(seq uint, eventChan chan<- interface{}) *pair {
 	return &pair{connSeq: seq, eventChan: eventChan, idChan: make(chan int, 10000)}
 }
 
-func (p *pair) run(stream *httpStream) {
+func (p *pair) run(wg *sync.WaitGroup, stream *httpStream) {
+	defer wg.Done()
 	defer close(stream.reader.stopCh)
 
 	dir := DirectionUnknown

@@ -48,36 +48,22 @@ func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWrite
 	for {
 		select {
 		case p := <-ps.Packets():
-			if p == nil {
+			if p == nil { // A nil packet indicates the end of a pcap file.
 				return count
 			}
 
-			if v := assemblerTcp(p, pcapWriter, assembler); v != nil {
-				lastPacketTimestamp = *v
-				count++
+			n, t := p.NetworkLayer(), p.TransportLayer()
+			if n == nil || t == nil || t.LayerType() != layers.LayerTypeTCP {
+				continue
 			}
+
+			info := p.Metadata().CaptureInfo
+			_ = pcapWriter(info, p.Data())
+			assembler.AssembleWithTimestamp(n.NetworkFlow(), t.(*layers.TCP), info.Timestamp)
+			lastPacketTimestamp = info.Timestamp
+			count++
 		case <-ticker:
 			assembler.FlushOlderThan(lastPacketTimestamp.Add(time.Minute * -2))
 		}
 	}
-}
-
-func assemblerTcp(p gopacket.Packet, pcapWriter pcapWriterFn, assembler *tcpassembly.Assembler) *time.Time {
-	netLayer := p.NetworkLayer()
-	if netLayer == nil {
-		return nil
-	}
-	transLayer := p.TransportLayer()
-	if transLayer == nil {
-		return nil
-	}
-	tcp, _ := transLayer.(*layers.TCP)
-	if tcp == nil {
-		return nil
-	}
-
-	info := p.Metadata().CaptureInfo
-	_ = pcapWriter(info, p.Data())
-	assembler.AssembleWithTimestamp(netLayer.NetworkFlow(), tcp, info.Timestamp)
-	return &info.Timestamp
 }

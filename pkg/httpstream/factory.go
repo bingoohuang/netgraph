@@ -35,33 +35,39 @@ func (f *Factory) RunningStreamCount() int32 { return atomic.LoadInt32(&f.runnin
 func (f *Factory) New(netFlow, tcpFlow gopacket.Flow) tcpassembly.Stream {
 	key := streamKey{net: netFlow, tcp: tcpFlow}
 	stream := newHTTPStream(key)
-
+	f.wg.Add(1)
 	revkey := streamKey{net: netFlow.Reverse(), tcp: tcpFlow.Reverse()}
+
 	f.uniStreamsLock.Lock()
+	defer f.uniStreamsLock.Unlock()
+
 	if p, ok := f.uniStreams[revkey]; ok {
 		delete(f.uniStreams, revkey)
-		f.uniStreamsLock.Unlock()
-		go p.run(stream)
+		go p.run(&f.wg, stream)
 		return stream
 	}
 
 	p := newPair(f.seq, f.eventChan)
 	f.uniStreams[key] = p
-	f.uniStreamsLock.Unlock()
 	f.seq++
-	f.wg.Add(1)
-	go func() {
-		atomic.AddInt32(&f.runningStream, 1)
-		defer atomic.AddInt32(&f.runningStream, -1)
-		defer f.wg.Done()
-		defer func() {
-			f.uniStreamsLock.Lock()
-			delete(f.uniStreams, key)
-			f.uniStreamsLock.Unlock()
-		}()
 
-		p.run(stream)
+	go func() {
+		defer Count(&f.runningStream)()
+		defer f.DeleteUniStream(key)
+
+		p.run(&f.wg, stream)
 	}()
 
 	return stream
+}
+
+func (f *Factory) DeleteUniStream(key streamKey) {
+	f.uniStreamsLock.Lock()
+	delete(f.uniStreams, key)
+	f.uniStreamsLock.Unlock()
+}
+
+func Count(counter *int32) func() {
+	atomic.AddInt32(counter, 1)
+	return func() { atomic.AddInt32(counter, -1) }
 }
