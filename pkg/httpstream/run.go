@@ -28,7 +28,7 @@ func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<
 
 	factory := NewFactory(eventChan)
 	assembler := tcpassembly.NewAssembler(tcpassembly.NewStreamPool(factory))
-	count := loop(packetSource, pcapWriter, assembler)
+	count := loop(assembler, packetSource, pcapWriter)
 	assembler.FlushAll()
 	log.Println("Read pcap file complete")
 	factory.Wait()
@@ -40,8 +40,9 @@ func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<
 
 type pcapWriterFn func(ci gopacket.CaptureInfo, data []byte) error
 
-func loop(ps *gopacket.PacketSource, pcapWriter pcapWriterFn, assembler *tcpassembly.Assembler) int {
+func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWriter pcapWriterFn) int {
 	ticker := time.Tick(time.Minute)
+
 	var lastPacketTimestamp time.Time
 	count := 0
 	for {
@@ -51,26 +52,32 @@ func loop(ps *gopacket.PacketSource, pcapWriter pcapWriterFn, assembler *tcpasse
 				return count
 			}
 
-			count++
-			netLayer := p.NetworkLayer()
-			if netLayer == nil {
-				continue
+			if v := assemblerTcp(p, pcapWriter, assembler); v != nil {
+				lastPacketTimestamp = *v
+				count++
 			}
-			transLayer := p.TransportLayer()
-			if transLayer == nil {
-				continue
-			}
-			tcp, _ := transLayer.(*layers.TCP)
-			if tcp == nil {
-				continue
-			}
-
-			info := p.Metadata().CaptureInfo
-			_ = pcapWriter(info, p.Data())
-			assembler.AssembleWithTimestamp(netLayer.NetworkFlow(), tcp, info.Timestamp)
-			lastPacketTimestamp = info.Timestamp
 		case <-ticker:
 			assembler.FlushOlderThan(lastPacketTimestamp.Add(time.Minute * -2))
 		}
 	}
+}
+
+func assemblerTcp(p gopacket.Packet, pcapWriter pcapWriterFn, assembler *tcpassembly.Assembler) *time.Time {
+	netLayer := p.NetworkLayer()
+	if netLayer == nil {
+		return nil
+	}
+	transLayer := p.TransportLayer()
+	if transLayer == nil {
+		return nil
+	}
+	tcp, _ := transLayer.(*layers.TCP)
+	if tcp == nil {
+		return nil
+	}
+
+	info := p.Metadata().CaptureInfo
+	_ = pcapWriter(info, p.Data())
+	assembler.AssembleWithTimestamp(netLayer.NetworkFlow(), tcp, info.Timestamp)
+	return &info.Timestamp
 }

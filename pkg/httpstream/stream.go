@@ -131,9 +131,9 @@ func (s *httpStream) parseHeaders() (headers []Header, err error) {
 }
 
 func (s *httpStream) parseChunked() (body []byte, err error) {
+	var buf []byte
 	for {
-		buf, err := s.reader.ReadUntil([]byte("\r\n"))
-		if err != nil {
+		if buf, err = s.reader.ReadUntil([]byte("\r\n")); err != nil {
 			return nil, fmt.Errorf("read chuncked content, error: %w", err)
 		}
 		l := string(buf)
@@ -143,17 +143,17 @@ func (s *httpStream) parseChunked() (body []byte, err error) {
 			return nil, fmt.Errorf("bad chunked block length %s, error: %w", l, err)
 		}
 
-		buf, err = s.reader.Next(int(blockSize))
-		body = append(body, buf...)
-		if err != nil {
+		if blockSize > 0 {
+			if buf, err = s.reader.Next(int(blockSize)); err != nil {
+				return nil, fmt.Errorf("read chuncked content, error: %w", err)
+			}
+			body = append(body, buf...)
+		}
+
+		if buf, err = s.reader.Next(2); err != nil {
 			return nil, fmt.Errorf("read chuncked content, error: %w", err)
 		}
-		buf, err = s.reader.Next(2)
-		if err != nil {
-			return nil, fmt.Errorf("read chuncked content, error: %w", err)
-		}
-		CRLF := string(buf)
-		if CRLF != "\r\n" {
+		if CRLF := string(buf); CRLF != "\r\n" {
 			return nil, fmt.Errorf("bad chunked block data")
 		}
 
@@ -161,6 +161,7 @@ func (s *httpStream) parseChunked() (body []byte, err error) {
 			break
 		}
 	}
+
 	return body, nil
 }
 
@@ -169,7 +170,7 @@ func parseContentInfo(hs []Header) (contentLen int, contentEncoding, contentType
 		switch strings.ToLower(h.Name) {
 		case "content-length":
 			if contentLen, err = strconv.Atoi(h.Value); err != nil {
-				return 0, "", "", false,
+				return contentLen, contentEncoding, contentType, chunked,
 					fmt.Errorf("content-Length: %s, error: %w", h.Value, err)
 			}
 		case "transfer-encoding":
@@ -180,7 +181,8 @@ func parseContentInfo(hs []Header) (contentLen int, contentEncoding, contentType
 			contentType = h.Value
 		}
 	}
-	return
+
+	return contentLen, contentEncoding, contentType, chunked, nil
 }
 
 func (s *httpStream) parseBody(method string, headers []Header, isRequest bool) (body []byte, e error) {
