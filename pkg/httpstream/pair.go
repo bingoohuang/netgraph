@@ -27,30 +27,27 @@ type Event struct {
 	Start, End time.Time
 	StreamSeq  uint
 	ID         int
+	ClientAddr string
+	ServerAddr string
+	Headers    []Header
+	Body       []byte
 }
 
 // RequestEvent is HTTP request.
 type RequestEvent struct {
 	Event
-	ClientAddr string
-	ServerAddr string
-	Method     string
-	URI        string
-	Version    string
-	Headers    []Header
-	Body       []byte
+	Method  string
+	URI     string
+	Version string
 }
 
 // ResponseEvent is HTTP response.
 type ResponseEvent struct {
 	Event
-	ClientAddr string
-	ServerAddr string
-	Version    string
-	Code       string
-	Reason     string
-	Headers    []Header
-	Body       []byte
+
+	Version string
+	Code    string
+	Reason  string
 }
 
 // pair is Bi-direction HTTP stream pair.
@@ -104,19 +101,20 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 	p.id++
 	TryPut(p.idChan, p.id)
 	p.eventChan <- RequestEvent{
-		ClientAddr: p.clientAddr,
-		ServerAddr: p.serverAddr,
-		Method:     method,
-		URI:        uri,
-		Version:    version,
-		Headers:    reqHeaders,
-		Body:       reqBody,
+		Method:  method,
+		URI:     uri,
+		Version: version,
+
 		Event: Event{
-			Type:      "HTTPRequest",
-			StreamSeq: p.connSeq,
-			Start:     reqStart,
-			End:       s.reader.lastSeen,
-			ID:        p.id,
+			ClientAddr: p.clientAddr,
+			ServerAddr: p.serverAddr,
+			Type:       "HTTPRequest",
+			StreamSeq:  p.connSeq,
+			Start:      reqStart,
+			End:        s.reader.lastSeen,
+			ID:         p.id,
+			Headers:    reqHeaders,
+			Body:       reqBody,
 		},
 	}
 	return nil
@@ -170,19 +168,20 @@ func (p *pair) handleResponseTransaction(respVersion, code, reason string, strea
 		return err
 	}
 	p.eventChan <- ResponseEvent{
-		ClientAddr: p.clientAddr,
-		ServerAddr: p.serverAddr,
-		Version:    respVersion,
-		Code:       code,
-		Reason:     reason,
-		Headers:    respHeaders,
-		Body:       respBody,
+		Version: respVersion,
+		Code:    code,
+		Reason:  reason,
+
 		Event: Event{
-			Type:      "HTTPResponse",
-			StreamSeq: p.connSeq,
-			Start:     respStart,
-			End:       stream.reader.lastSeen,
-			ID:        TryGetValue(p.idChan),
+			Type:       "HTTPResponse",
+			StreamSeq:  p.connSeq,
+			Start:      respStart,
+			End:        stream.reader.lastSeen,
+			ID:         TryGetValue(p.idChan),
+			ClientAddr: p.clientAddr,
+			ServerAddr: p.serverAddr,
+			Headers:    respHeaders,
+			Body:       respBody,
 		},
 	}
 
@@ -194,30 +193,30 @@ var fp = func(w io.Writer, format string, a ...interface{}) int64 {
 	return int64(n)
 }
 
-func (r RequestEvent) WriteTo(out io.Writer) (n int64, err error) {
-	n += fp(out, "[%s] #%d Request %s->%s\r\n",
-		r.Start.Format("2006-01-02 15:04:05.000"), r.StreamSeq, r.ClientAddr, r.ServerAddr)
-	n += fp(out, "%s %s %s\r\n", r.Method, r.URI, r.Version)
-	for _, h := range r.Headers {
-		n += fp(out, "%s: %s\r\n", h.Name, h.Value)
-	}
+const layout = "2006-01-02 15:04:05.000"
 
-	n += fp(out, "\r\ncontent(%d)", len(r.Body))
-	if len(r.Body) > 0 {
-		n += fp(out, "%s", r.Body)
-	}
-	n += fp(out, "\r\n\r\n")
-	return n, nil
+func (r RequestEvent) WriteTo(out io.Writer) (n int64, err error) {
+	n += fp(out, "#%d [%s] Request %s->%s\r\n", r.StreamSeq, r.Start.Format(layout), r.ClientAddr, r.ServerAddr)
+	n += fp(out, "%s %s %s\r\n", r.Method, r.URI, r.Version)
+	n = r.writeHeader(out, n)
+	return r.writeBody(out, n)
 }
 
 func (r ResponseEvent) WriteTo(out io.Writer) (n int64, err error) {
-	n += fp(out, "[%s] #%d Response %s<-%s\r\n",
-		r.Start.Format("2006-01-02 15:04:05.000"), r.StreamSeq, r.ClientAddr, r.ServerAddr)
+	n += fp(out, "#%d [%s] Response %s<-%s\r\n", r.StreamSeq, r.Start.Format(layout), r.ClientAddr, r.ServerAddr)
 	n += fp(out, "%s %s %s\r\n", r.Version, r.Code, r.Reason)
+	n = r.writeHeader(out, n)
+	return r.writeBody(out, n)
+}
+
+func (r Event) writeHeader(out io.Writer, n int64) int64 {
 	for _, h := range r.Headers {
 		n += fp(out, "%s: %s\r\n", h.Name, h.Value)
 	}
+	return n
+}
 
+func (r Event) writeBody(out io.Writer, n int64) (int64, error) {
 	n += fp(out, "\r\ncontent(%d)", len(r.Body))
 	if len(r.Body) > 0 {
 		n += fp(out, "%s", r.Body)
