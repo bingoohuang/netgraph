@@ -13,7 +13,7 @@ func main() {
 	f := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	input := f.String("i", "any", "Device to capture, or pcap filename to open")
 	bpf := f.String("bpf", "tcp port 80", "Set berkeley packet filter")
-	outHTTP := f.String("o", "", "Write HTTP request/response to file")
+	outHTTP := f.String("o", "", "Write HTTP request/response to file, with :replay suffix to create a http file that can be replayed")
 	outPcap := f.String("o.pcap", "", "Write captured packet to a pcap file")
 	port := f.Int("p", 9000, "Web server port. If the port is set to '0', the server will not run.")
 	saveEvent := f.Bool("s", false, "Save HTTP event in server")
