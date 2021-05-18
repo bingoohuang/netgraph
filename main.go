@@ -15,7 +15,7 @@ func main() {
 	bpf := f.String("bpf", "tcp port 80", "Set berkeley packet filter")
 	outHTTP := f.String("o", "", "Write HTTP request/response to file, with :replay suffix to create a http file that can be replayed")
 	outPcap := f.String("o.pcap", "", "Write captured packet to a pcap file")
-	port := f.Int("p", 9000, "Web server port. If the port is set to '0', the server will not run.")
+	port := f.Int("p", 0, "Web server port. 0 for no  web server.")
 	saveEvent := f.Bool("s", false, "Save HTTP event in server")
 	verbose := f.Bool("v", true, "Show more message")
 	_ = f.Parse(os.Args[1:])
