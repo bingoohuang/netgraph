@@ -23,7 +23,7 @@ type Arg struct {
 
 func (a Arg) ShowVersion() {
 	if a.Version {
-		fmt.Printf("netgraph v1.0.1 2021-05-18 17:44:42")
+		fmt.Println("netgraph v1.0.1 2021-05-18 17:44:42")
 		os.Exit(0)
 	}
 }
