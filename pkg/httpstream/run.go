@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<- interface{}, snapLen uint32) error {
+func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<- interface{}, snapLen int) error {
 	pcapWriter, writerCloser, err := createPcapWriter(outputPcap, snapLen)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWrite
 	}
 }
 
-func createPcapWriter(outputPcap string, snapLen uint32) (pcapWriterFn, func(), error) {
+func createPcapWriter(outputPcap string, snapLen int) (pcapWriterFn, func(), error) {
 	if outputPcap == "" {
 		return func(gopacket.CaptureInfo, []byte) error { return nil }, func() {}, nil
 	}
@@ -68,7 +68,7 @@ func createPcapWriter(outputPcap string, snapLen uint32) (pcapWriterFn, func(), 
 	}
 
 	w := pcapgo.NewWriter(f)
-	if err := w.WriteFileHeader(snapLen, layers.LinkTypeEthernet); err != nil {
+	if err := w.WriteFileHeader(uint32(snapLen), layers.LinkTypeEthernet); err != nil {
 		_ = f.Close()
 		return nil, nil, err
 	}

@@ -11,7 +11,7 @@ import (
 
 // NewPacketSource creates a new PacketSource.
 // device can be an interface device name or local pcap filename.
-func NewPacketSource(device, bpf string) (*gopacket.PacketSource, error) {
+func NewPacketSource(device, bpf string, snapLen int) (*gopacket.PacketSource, error) {
 	stat, err := os.Stat(device)
 	if err == nil && !stat.IsDir() {
 		h, err := pcap.OpenOffline(device)
@@ -31,7 +31,7 @@ func NewPacketSource(device, bpf string) (*gopacket.PacketSource, error) {
 	// 同时这个模式也被网络黑客利用来作为网络数据窃听的入口。
 	// 在Linux操作系统中设置网卡混杂模式时需要管理员权限。
 	// 在Windows操作系统和Linux操作系统中都有使用混杂模式的抓包工具，比如著名的开源软件Wireshark。
-	h, err := pcap.OpenLive(device, 65535, false, pcap.BlockForever)
+	h, err := pcap.OpenLive(device, int32(snapLen), false, pcap.BlockForever)
 	if err != nil {
 		return nil, err
 	}
@@ -87,12 +87,9 @@ func TryPut(c chan int, v int) bool {
 
 var reScheme = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+-.]*://`)
 
-func Fulfil(baseUrl, uri string) string {
-	if baseUrl != "" {
-		return uri
-	}
+const defaultScheme, defaultHost = "http", "127.0.0.1"
 
-	defaultScheme, defaultHost := "http", "127.0.0.1"
+func Fulfil(uri string) string {
 	if uri == ":" {
 		uri = ":80"
 	}

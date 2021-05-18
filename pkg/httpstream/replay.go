@@ -62,7 +62,7 @@ func (p *EventReplay) replay(v RequestEvent) {
 		return
 	}
 
-	u := Fulfil("", fmt.Sprintf("%s%s", p.Addr, v.URI))
+	u := Fulfil(fmt.Sprintf("%s%s", p.Addr, v.URI))
 
 	v.Header.Add(XHttpCapRelay, "true")
 	for _, n := range []string{"User-Agent", "Host", "Connection", "Transfer-Encoding", "Content-Length"} {

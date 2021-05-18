@@ -17,7 +17,7 @@ func main() {
 	replayMethod := f.String("replay.method", "", "Replay if HTTP request method matches, empty for ANY, eg POST,GET")
 	port := f.Int("p", 0, "Web server port. 0 for no  web server.")
 	eventSize := f.Int("event.size", 1024, "Event channel size.")
-	snapLen := f.Uint("snap.len", 65535, "Snap length (max bytes per packet to capture).")
+	snapLen := f.Int("snap.len", 65535, "Snap length (max bytes per packet to capture).")
 	saveEvent := f.Bool("s", false, "Save HTTP event in server")
 	verbose := f.Bool("v", false, "Show version")
 	_ = f.Parse(os.Args[1:])
@@ -27,13 +27,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	source, err := httpstream.NewPacketSource(*input, *bpf)
+	source, err := httpstream.NewPacketSource(*input, *bpf, *snapLen)
 	if err != nil {
 		panic(err)
 	}
 
 	eventChan := make(chan interface{}, *eventSize)
-	go httpstream.Run(source, *outPcap, eventChan, uint32(*snapLen))
+	go httpstream.Run(source, *outPcap, eventChan, *snapLen)
 
 	handlers := initEventHandlers(*port, *outHTTP, *replay, *replayMethod, *saveEvent)
 	runEventHandler(handlers, eventChan)
