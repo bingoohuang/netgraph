@@ -28,7 +28,7 @@ func NewPacketSource(device, bpf string) (*gopacket.PacketSource, error) {
 	// 同时这个模式也被网络黑客利用来作为网络数据窃听的入口。
 	// 在Linux操作系统中设置网卡混杂模式时需要管理员权限。
 	// 在Windows操作系统和Linux操作系统中都有使用混杂模式的抓包工具，比如著名的开源软件Wireshark。
-	h, err := pcap.OpenLive(device, 1024*1024, false, pcap.BlockForever)
+	h, err := pcap.OpenLive(device, 65535, false, pcap.BlockForever)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,8 @@ func AutoSelectDev() string {
 
 	for _, i := range ifs {
 		for _, j := range i.Addresses {
-			if j.IP.IsLoopback() || j.IP.IsMulticast() || j.IP.IsUnspecified() || j.IP.IsLinkLocalUnicast() {
+			ip := j.IP
+			if ip.IsLoopback() || ip.IsMulticast() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
 				continue
 			}
 			return i.Name
@@ -56,4 +57,27 @@ func AutoSelectDev() string {
 	}
 
 	return "any"
+}
+
+func TryGet(c chan int) int {
+	v, _ := TryGet2(c)
+	return v
+}
+
+func TryGet2(c chan int) (int, bool) {
+	select {
+	case v := <-c:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+func TryPut(c chan int, v int) bool {
+	select {
+	case c <- v:
+		return true
+	default:
+		return false
+	}
 }

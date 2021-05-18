@@ -71,13 +71,13 @@ func (p *pair) run(wg *sync.WaitGroup, stream *httpStream) {
 
 	dir := DirectionUnknown
 	for {
-		err := p.handleTransaction(&dir, stream)
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Printf("EOF %s", stream.key.String())
-			return // We must read until we see an EOF... very important!
-		} else if err != nil {
-			log.Printf("E! Reading stream %s, error: %v", stream.key.String(), err)
-			continue
+		if err := p.handleTransaction(&dir, stream); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				log.Printf("EOF %s", stream.key.String())
+			} else {
+				log.Printf("E! %s, error: %v", stream.key.String(), err)
+			}
+			return
 		}
 	}
 }
@@ -120,29 +120,6 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 	return nil
 }
 
-func TryGetValue(c chan int) int {
-	v, _ := TryGet(c)
-	return v
-}
-
-func TryGet(c chan int) (int, bool) {
-	select {
-	case v := <-c:
-		return v, true
-	default:
-		return 0, false
-	}
-}
-
-func TryPut(c chan int, v int) bool {
-	select {
-	case c <- v:
-		return true
-	default:
-		return false
-	}
-}
-
 func (p *pair) handleTransaction(dir *Direction, stream *httpStream) error {
 	direction, p1, p2, p3, err := stream.parseFirstLine(*dir)
 	if err != nil {
@@ -152,9 +129,9 @@ func (p *pair) handleTransaction(dir *Direction, stream *httpStream) error {
 
 	if direction == DirectionRequest {
 		return p.handleRequestTransaction(p1, p2, p3, stream)
+	} else {
+		return p.handleResponseTransaction(p1, p2, p3, stream)
 	}
-
-	return p.handleResponseTransaction(p1, p2, p3, stream)
 }
 
 func (p *pair) handleResponseTransaction(respVersion, code, reason string, stream *httpStream) error {
@@ -177,7 +154,7 @@ func (p *pair) handleResponseTransaction(respVersion, code, reason string, strea
 			StreamSeq:  p.connSeq,
 			Start:      respStart,
 			End:        stream.reader.lastSeen,
-			ID:         TryGetValue(p.idChan),
+			ID:         TryGet(p.idChan),
 			ClientAddr: p.clientAddr,
 			ServerAddr: p.serverAddr,
 			Headers:    respHeaders,

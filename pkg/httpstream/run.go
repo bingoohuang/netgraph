@@ -11,20 +11,11 @@ import (
 )
 
 func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<- interface{}) error {
-	pcapWriter := func(ci gopacket.CaptureInfo, data []byte) error { return nil }
-	if outputPcap != "" {
-		outPcapFile, err := os.Create(outputPcap)
-		if err != nil {
-			return err
-		}
-
-		defer outPcapFile.Close()
-		w := pcapgo.NewWriter(outPcapFile)
-		if err := w.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-			return err
-		}
-		pcapWriter = w.WritePacket
+	pcapWriter, writerCloser, err := createPcapWriter(outputPcap)
+	if err != nil {
+		return err
 	}
+	defer writerCloser()
 
 	factory := NewFactory(eventChan)
 	assembler := tcpassembly.NewAssembler(tcpassembly.NewStreamPool(factory))
@@ -38,13 +29,11 @@ func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<
 	return nil
 }
 
-type pcapWriterFn func(ci gopacket.CaptureInfo, data []byte) error
-
 func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWriter pcapWriterFn) int {
-	ticker := time.Tick(time.Minute)
-
-	var lastPacketTimestamp time.Time
 	count := 0
+	last := time.Now()
+	ticker := time.Tick(5 * time.Second)
+
 	for {
 		select {
 		case p := <-ps.Packets():
@@ -60,10 +49,31 @@ func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWrite
 			info := p.Metadata().CaptureInfo
 			_ = pcapWriter(info, p.Data())
 			assembler.AssembleWithTimestamp(n.NetworkFlow(), t.(*layers.TCP), info.Timestamp)
-			lastPacketTimestamp = info.Timestamp
+			last = info.Timestamp
 			count++
 		case <-ticker:
-			assembler.FlushOlderThan(lastPacketTimestamp.Add(time.Minute * -2))
+			assembler.FlushOlderThan(last.Add(time.Second * -10))
 		}
 	}
 }
+
+func createPcapWriter(outputPcap string) (pcapWriterFn, func(), error) {
+	if outputPcap == "" {
+		return func(gopacket.CaptureInfo, []byte) error { return nil }, func() {}, nil
+	}
+
+	f, err := os.Create(outputPcap)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	w := pcapgo.NewWriter(f)
+	if err := w.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+
+	return w.WritePacket, func() { _ = f.Close() }, nil
+}
+
+type pcapWriterFn func(ci gopacket.CaptureInfo, data []byte) error
