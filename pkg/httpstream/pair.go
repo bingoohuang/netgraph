@@ -17,6 +17,20 @@ type EventHandler interface {
 	Wait()
 }
 
+type EventHandlers []EventHandler
+
+func (handlers EventHandlers) Run(eventChan <-chan interface{}) {
+	for e := range eventChan {
+		for _, h := range handlers {
+			h.PushEvent(e)
+		}
+	}
+
+	for _, h := range handlers {
+		h.Wait()
+	}
+}
+
 // Header is HTTP header key-value pair.
 type Header struct {
 	Name  string

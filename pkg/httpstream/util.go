@@ -1,10 +1,13 @@
 package httpstream
 
 import (
+	"flag"
+	"github.com/bingoohuang/gg/pkg/cast"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -115,4 +118,36 @@ func Fulfil(uri string) string {
 	}
 
 	return u.String()
+}
+
+func ParseFlags(a interface{}) {
+	f := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+	ra := reflect.ValueOf(a).Elem()
+	t := ra.Type()
+	for i := 0; i < t.NumField(); i++ {
+		fi := t.Field(i)
+		name := fi.Tag.Get("flag")
+		if name == "" {
+			continue
+		}
+
+		fv := ra.Field(i)
+		if !fv.CanAddr() {
+			continue
+		}
+
+		val, usage := fi.Tag.Get("val"), fi.Tag.Get("usage")
+		p := fv.Addr().Interface()
+		switch fi.Type.Kind() {
+		case reflect.String:
+			f.StringVar(p.(*string), name, val, usage)
+		case reflect.Int:
+			f.IntVar(p.(*int), name, cast.ToInt(val), usage)
+		case reflect.Bool:
+			f.BoolVar(p.(*bool), name, cast.ToBool(val), usage)
+		}
+	}
+
+	_ = f.Parse(os.Args[1:])
 }
