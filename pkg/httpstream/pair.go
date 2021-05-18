@@ -1,10 +1,12 @@
 package httpstream
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -29,7 +31,7 @@ type Event struct {
 	ID         int
 	ClientAddr string
 	ServerAddr string
-	Headers    []Header
+	Header     http.Header
 	Body       []byte
 }
 
@@ -44,7 +46,6 @@ type RequestEvent struct {
 // ResponseEvent is HTTP response.
 type ResponseEvent struct {
 	Event
-
 	Version string
 	Code    string
 	Reason  string
@@ -84,7 +85,7 @@ func (p *pair) run(wg *sync.WaitGroup, stream *httpStream) {
 
 func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStream) error {
 	reqStart := s.reader.lastSeen
-	reqHeaders, err := s.parseHeaders()
+	reqHeader, err := s.parseHeader()
 	if err != nil {
 		return err
 	}
@@ -92,7 +93,7 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 	p.clientAddr = s.key.net.Src().String() + ":" + s.key.tcp.Src().String()
 	p.serverAddr = s.key.net.Dst().String() + ":" + s.key.tcp.Dst().String()
 
-	reqBody, err := s.parseBody(method, reqHeaders, true)
+	reqBody, err := s.parseBody(method, reqHeader, true)
 	if err != nil {
 		return err
 	}
@@ -113,7 +114,7 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 			Start:      reqStart,
 			End:        s.reader.lastSeen,
 			ID:         p.id,
-			Headers:    reqHeaders,
+			Header:     reqHeader,
 			Body:       reqBody,
 		},
 	}
@@ -136,11 +137,11 @@ func (p *pair) handleTransaction(dir *Direction, stream *httpStream) error {
 
 func (p *pair) handleResponseTransaction(respVersion, code, reason string, stream *httpStream) error {
 	respStart := stream.reader.lastSeen
-	respHeaders, err := stream.parseHeaders()
+	respHeader, err := stream.parseHeader()
 	if err != nil {
 		return err
 	}
-	respBody, err := stream.parseBody(p.method, respHeaders, false)
+	respBody, err := stream.parseBody(p.method, respHeader, false)
 	if err != nil {
 		return err
 	}
@@ -157,7 +158,7 @@ func (p *pair) handleResponseTransaction(respVersion, code, reason string, strea
 			ID:         TryGet(p.idChan),
 			ClientAddr: p.clientAddr,
 			ServerAddr: p.serverAddr,
-			Headers:    respHeaders,
+			Header:     respHeader,
 			Body:       respBody,
 		},
 	}
@@ -173,31 +174,35 @@ var fp = func(w io.Writer, format string, a ...interface{}) int64 {
 const layout = "2006-01-02 15:04:05.000"
 
 func (r RequestEvent) WriteTo(out io.Writer) (n int64, err error) {
-	n += fp(out, "#%d [%s] Request %s->%s\r\n", r.StreamSeq, r.Start.Format(layout), r.ClientAddr, r.ServerAddr)
-	n += fp(out, "%s %s %s\r\n", r.Method, r.URI, r.Version)
-	n = r.writeHeader(out, n)
-	return r.writeBody(out, n)
+	var b bytes.Buffer
+	b.WriteString(fmt.Sprintf("#%d [%s] Request %s->%s\r\n", r.StreamSeq,
+		r.Start.Format(layout), r.ClientAddr, r.ServerAddr))
+	b.WriteString(fmt.Sprintf("%s %s %s\r\n", r.Method, r.URI, r.Version))
+	r.writeHeader(&b)
+	r.writeBody(&b)
+	return b.WriteTo(out)
 }
 
 func (r ResponseEvent) WriteTo(out io.Writer) (n int64, err error) {
-	n += fp(out, "#%d [%s] Response %s<-%s\r\n", r.StreamSeq, r.Start.Format(layout), r.ClientAddr, r.ServerAddr)
-	n += fp(out, "%s %s %s\r\n", r.Version, r.Code, r.Reason)
-	n = r.writeHeader(out, n)
-	return r.writeBody(out, n)
+	var b bytes.Buffer
+	b.WriteString(fmt.Sprintf("#%d [%s] Response %s<-%s\r\n", r.StreamSeq,
+		r.Start.Format(layout), r.ClientAddr, r.ServerAddr))
+	b.WriteString(fmt.Sprintf("%s %s %s\r\n", r.Version, r.Code, r.Reason))
+	r.writeHeader(&b)
+	r.writeBody(&b)
+	return b.WriteTo(out)
 }
 
-func (r Event) writeHeader(out io.Writer, n int64) int64 {
-	for _, h := range r.Headers {
-		n += fp(out, "%s: %s\r\n", h.Name, h.Value)
+func (r Event) writeHeader(b *bytes.Buffer) {
+	for h := range r.Header {
+		b.WriteString(fmt.Sprintf("%s: %s\r\n", h, r.Header.Get(h)))
 	}
-	return n
 }
 
-func (r Event) writeBody(out io.Writer, n int64) (int64, error) {
-	n += fp(out, "\r\ncontent(%d)", len(r.Body))
+func (r Event) writeBody(b *bytes.Buffer) {
 	if len(r.Body) > 0 {
-		n += fp(out, "%s", r.Body)
+		b.WriteString(fmt.Sprintf("\r\ncontent(%d)", len(r.Body)))
+		b.WriteString(fmt.Sprintf("%s", r.Body))
 	}
-	n += fp(out, "\r\n\r\n")
-	return n, nil
+	b.WriteString(fmt.Sprintf("\r\n\r\n"))
 }

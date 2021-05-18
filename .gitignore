@@ -4,3 +4,4 @@ test.pcap
 .idea/
 debug
 .DS_Store
+/httplive.db

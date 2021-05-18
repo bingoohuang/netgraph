@@ -8,6 +8,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/tcpassembly"
 	"io/ioutil"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -109,25 +110,24 @@ func (s *httpStream) parseFirstLine(initDir Direction) (dir Direction, p1, p2, p
 	return DirectionUnknown, "", "", "", fmt.Errorf("bad HTTP first line: %s", line)
 }
 
-func (s *httpStream) parseHeaders() (headers []Header, err error) {
+func (s *httpStream) parseHeader() (header http.Header, err error) {
 	d, err := s.reader.ReadUntil([]byte("\r\n\r\n"))
 	if err != nil {
 		return nil, fmt.Errorf("read headers error: %w", err)
 	}
 
+	header = make(http.Header)
 	data := string(d[:len(d)-4])
 	for i, line := range strings.Split(data, "\r\n") {
 		p := strings.Index(line, ":")
 		if p == -1 {
 			return nil, fmt.Errorf("bad http header (line %d): %s", i, data)
 		}
-		headers = append(headers, Header{
-			Name:  line[:p],
-			Value: strings.Trim(line[p+1:], " "),
-		})
+
+		header.Add(line[:p], strings.Trim(line[p+1:], " "))
 	}
 
-	return headers, nil
+	return header, nil
 }
 
 func (s *httpStream) parseChunked() (body []byte, err error) {
@@ -165,28 +165,28 @@ func (s *httpStream) parseChunked() (body []byte, err error) {
 	return body, nil
 }
 
-func parseContentInfo(hs []Header) (contentLen int, contentEncoding, contentType string, chunked bool, err error) {
-	for _, h := range hs {
-		switch strings.ToLower(h.Name) {
+func parseContentInfo(hs http.Header) (contentLen int, contentEncoding, contentType string, chunked bool, err error) {
+	for name := range hs {
+		switch value := hs.Get(name); strings.ToLower(name) {
 		case "content-length":
-			if contentLen, err = strconv.Atoi(h.Value); err != nil {
+			if contentLen, err = strconv.Atoi(value); err != nil {
 				return contentLen, contentEncoding, contentType, chunked,
-					fmt.Errorf("content-Length: %s, error: %w", h.Value, err)
+					fmt.Errorf("content-Length: %s, error: %w", value, err)
 			}
 		case "transfer-encoding":
-			chunked = h.Value == "chunked"
+			chunked = value == "chunked"
 		case "content-encoding":
-			contentEncoding = h.Value
+			contentEncoding = value
 		case "content-type":
-			contentType = h.Value
+			contentType = value
 		}
 	}
 
 	return contentLen, contentEncoding, contentType, chunked, nil
 }
 
-func (s *httpStream) parseBody(method string, headers []Header, isRequest bool) (body []byte, e error) {
-	cLength, cEncoding, _, chunked, err := parseContentInfo(headers)
+func (s *httpStream) parseBody(method string, header http.Header, isRequest bool) (body []byte, e error) {
+	cLength, cEncoding, _, chunked, err := parseContentInfo(header)
 	if err != nil {
 		return nil, err
 	}
@@ -208,12 +208,12 @@ func (s *httpStream) parseBody(method string, headers []Header, isRequest bool) 
 	case "gzip":
 		r, _ := gzip.NewReader(bytes.NewBuffer(body))
 		data, err := ioutil.ReadAll(r)
-		defer r.Close()
+		_ = r.Close()
 		return data, err
 	case "deflate":
 		r, _ := zlib.NewReader(bytes.NewBuffer(body))
 		data, err := ioutil.ReadAll(r)
-		defer r.Close()
+		_ = r.Close()
 		return data, err
 	}
 

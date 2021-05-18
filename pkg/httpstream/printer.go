@@ -7,13 +7,22 @@ import (
 	"strings"
 )
 
-// EventPrinter print HTTP events to file or stdout.
+// EventPrinter print HTTP events to writer or stdout.
 type EventPrinter struct {
-	file   *os.File
+	writer io.WriteCloser
 	replay bool
 }
 
 const replayTag = ":replay"
+
+type LogWriter struct{}
+
+func (l LogWriter) Write(p []byte) (n int, err error) {
+	log.Printf("{PRE}Request %s", p)
+	return 0, nil
+}
+
+func (l LogWriter) Close() error { return nil }
 
 // NewEventPrinter creates EventPrinter.
 func NewEventPrinter(name string) *EventPrinter {
@@ -21,25 +30,28 @@ func NewEventPrinter(name string) *EventPrinter {
 	if replay {
 		name = name[:len(name)-len(replayTag)]
 	}
-	if name == "stdout" {
-		return &EventPrinter{file: os.Stdout, replay: replay}
-	}
+	switch name {
+	case "stdout":
+		return &EventPrinter{writer: os.Stdout, replay: replay}
+	case "log":
+		return &EventPrinter{writer: &LogWriter{}, replay: replay}
+	default:
+		f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0755)
+		if err != nil {
+			log.Fatalln("Cannot open writer ", name)
+		}
 
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0755)
-	if err != nil {
-		log.Fatalln("Cannot open file ", name)
+		return &EventPrinter{writer: f, replay: replay}
 	}
-
-	return &EventPrinter{file: f, replay: replay}
 }
 
 // PushEvent implements the function of interface EventHandler.
 func (p *EventPrinter) PushEvent(e interface{}) {
 	switch v := e.(type) {
 	case RequestEvent:
-		_, _ = WriteRequestTo(p.replay, v, p.file)
+		_, _ = WriteRequestTo(p.replay, v, p.writer)
 	case ResponseEvent:
-		_, _ = WriteResponseTo(p.replay, v, p.file)
+		_, _ = WriteResponseTo(p.replay, v, p.writer)
 
 	default:
 		log.Printf("Unknown event: %v", e)
@@ -47,16 +59,18 @@ func (p *EventPrinter) PushEvent(e interface{}) {
 }
 
 // Wait implements the function of interface EventHandler.
-func (p *EventPrinter) Wait() {}
+func (p *EventPrinter) Wait() {
+	_ = p.writer.Close()
+}
 
 func WriteRequestTo(replay bool, r RequestEvent, out io.Writer) (n int64, err error) {
 	if replay {
 		n += fp(out, "###\r\n%s %s\r\n", r.Method, r.URI)
-		for _, h := range r.Headers {
-			switch h.Name {
+		for h := range r.Header {
+			switch h {
 			case "User-Agent", "Host", "Connection", "Transfer-Encoding":
 			default:
-				n += fp(out, "%s: %s\r\n", h.Name, h.Value)
+				n += fp(out, "%s: %s\r\n", h, r.Header.Get(h))
 			}
 		}
 		n += fp(out, "\r\n")

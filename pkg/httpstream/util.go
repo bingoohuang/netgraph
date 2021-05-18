@@ -3,7 +3,10 @@ package httpstream
 import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
+	"net/url"
 	"os"
+	"regexp"
+	"strings"
 )
 
 // NewPacketSource creates a new PacketSource.
@@ -80,4 +83,39 @@ func TryPut(c chan int, v int) bool {
 	default:
 		return false
 	}
+}
+
+var reScheme = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+-.]*://`)
+
+func Fulfil(baseUrl, uri string) string {
+	if baseUrl != "" {
+		return uri
+	}
+
+	defaultScheme, defaultHost := "http", "127.0.0.1"
+	if uri == ":" {
+		uri = ":80"
+	}
+
+	// ex) :8080/hello or /hello or :
+	if strings.HasPrefix(uri, ":") || strings.HasPrefix(uri, "/") {
+		uri = defaultHost + uri
+	}
+
+	// ex) example.com/hello
+	if !reScheme.MatchString(uri) {
+		uri = defaultScheme + "://" + uri
+	}
+
+	u, err := url.Parse(uri)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	u.Host = strings.TrimSuffix(u.Host, ":")
+	if u.Path == "" {
+		u.Path = "/"
+	}
+
+	return u.String()
 }

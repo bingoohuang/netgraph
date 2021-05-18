@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<- interface{}) error {
-	pcapWriter, writerCloser, err := createPcapWriter(outputPcap)
+func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<- interface{}, snapLen uint32) error {
+	pcapWriter, writerCloser, err := createPcapWriter(outputPcap, snapLen)
 	if err != nil {
 		return err
 	}
@@ -21,7 +21,7 @@ func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<
 	assembler := tcpassembly.NewAssembler(tcpassembly.NewStreamPool(factory))
 	count := loop(assembler, packetSource, pcapWriter)
 	assembler.FlushAll()
-	log.Println("Read pcap file complete")
+	log.Println("Read pcap writer complete")
 	factory.Wait()
 	log.Println("Parse complete, packet count: ", count)
 
@@ -37,7 +37,7 @@ func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWrite
 	for {
 		select {
 		case p := <-ps.Packets():
-			if p == nil { // A nil packet indicates the end of a pcap file.
+			if p == nil { // A nil packet indicates the end of a pcap writer.
 				return count
 			}
 
@@ -57,7 +57,7 @@ func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWrite
 	}
 }
 
-func createPcapWriter(outputPcap string) (pcapWriterFn, func(), error) {
+func createPcapWriter(outputPcap string, snapLen uint32) (pcapWriterFn, func(), error) {
 	if outputPcap == "" {
 		return func(gopacket.CaptureInfo, []byte) error { return nil }, func() {}, nil
 	}
@@ -68,7 +68,7 @@ func createPcapWriter(outputPcap string) (pcapWriterFn, func(), error) {
 	}
 
 	w := pcapgo.NewWriter(f)
-	if err := w.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+	if err := w.WriteFileHeader(snapLen, layers.LinkTypeEthernet); err != nil {
 		_ = f.Close()
 		return nil, nil, err
 	}
