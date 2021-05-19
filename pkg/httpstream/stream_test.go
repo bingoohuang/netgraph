@@ -12,7 +12,7 @@ import (
 
 func TestNgnet(t *testing.T) {
 	eventChan := make(chan interface{}, 1024)
-	f := NewFactory(eventChan)
+	f := NewFactory(eventChan, false, "")
 	pool := tcpassembly.NewStreamPool(f)
 	assembler := tcpassembly.NewAssembler(pool)
 	packetCount := 0

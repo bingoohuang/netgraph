@@ -72,21 +72,22 @@ type pair struct {
 
 	method, clientAddr, serverAddr string
 
-	idChan chan int
-	id     int
+	idChan       chan int
+	id           int
+	onlyRequests bool
 }
 
-func newPair(seq uint, eventChan chan<- interface{}) *pair {
-	return &pair{connSeq: seq, eventChan: eventChan, idChan: make(chan int, 10000)}
+func newPair(seq uint, eventChan chan<- interface{}, onlyRequests bool) *pair {
+	return &pair{connSeq: seq, eventChan: eventChan, idChan: make(chan int, 10000), onlyRequests: onlyRequests}
 }
 
-func (p *pair) run(wg *sync.WaitGroup, stream *httpStream) {
+func (p *pair) run(wg *sync.WaitGroup, stream *httpStream, methodAllowed func(string) bool) {
 	defer wg.Done()
 	defer close(stream.reader.stopCh)
 
 	dir := DirectionUnknown
 	for {
-		if err := p.handleTransaction(&dir, stream); err != nil {
+		if err := p.handleTransaction(&dir, stream, methodAllowed); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				log.Printf("EOF %s", stream.key.String())
 			} else {
@@ -97,7 +98,7 @@ func (p *pair) run(wg *sync.WaitGroup, stream *httpStream) {
 	}
 }
 
-func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStream) error {
+func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStream, methodAllowed func(string) bool) error {
 	reqStart := s.reader.lastSeen
 	reqHeader, err := s.parseHeader()
 	if err != nil {
@@ -115,6 +116,11 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 	p.method = method
 	p.id++
 	TryPut(p.idChan, p.id)
+
+	if !methodAllowed(method) {
+		return nil
+	}
+
 	p.eventChan <- RequestEvent{
 		Method:  method,
 		URI:     uri,
@@ -132,10 +138,11 @@ func (p *pair) handleRequestTransaction(method, uri, version string, s *httpStre
 			Body:       reqBody,
 		},
 	}
+
 	return nil
 }
 
-func (p *pair) handleTransaction(dir *Direction, stream *httpStream) error {
+func (p *pair) handleTransaction(dir *Direction, stream *httpStream, methodAllowed func(string) bool) error {
 	direction, p1, p2, p3, err := stream.parseFirstLine(*dir)
 	if err != nil {
 		return err
@@ -143,7 +150,7 @@ func (p *pair) handleTransaction(dir *Direction, stream *httpStream) error {
 	*dir = direction
 
 	if direction == DirectionRequest {
-		return p.handleRequestTransaction(p1, p2, p3, stream)
+		return p.handleRequestTransaction(p1, p2, p3, stream, methodAllowed)
 	} else {
 		return p.handleResponseTransaction(p1, p2, p3, stream)
 	}
@@ -159,6 +166,11 @@ func (p *pair) handleResponseTransaction(respVersion, code, reason string, strea
 	if err != nil {
 		return err
 	}
+
+	if p.onlyRequests {
+		return nil
+	}
+
 	p.eventChan <- ResponseEvent{
 		Version: respVersion,
 		Code:    code,

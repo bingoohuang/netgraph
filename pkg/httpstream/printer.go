@@ -7,6 +7,24 @@ import (
 	"strings"
 )
 
+type OutSuffix string
+type OutSuffixes []OutSuffix
+
+const (
+	SuffixHttp OutSuffix = ".http"
+	SuffixPcap OutSuffix = ".pcap"
+	SuffixLog  OutSuffix = ".log"
+	SuffixJson OutSuffix = ".json"
+)
+
+func (o OutSuffix) Get(s string) string {
+	if strings.HasSuffix(s, string(o)) {
+		return s
+	}
+
+	return ""
+}
+
 // EventPrinter print HTTP events to writer or stdout.
 type EventPrinter struct {
 	writer io.WriteCloser
@@ -26,23 +44,27 @@ func (l LogWriter) Close() error { return nil }
 
 // NewEventPrinter creates EventPrinter.
 func NewEventPrinter(name string) *EventPrinter {
-	replay := strings.HasSuffix(name, replayTag)
-	if replay {
-		name = name[:len(name)-len(replayTag)]
-	}
-	switch name {
-	case "stdout":
-		return &EventPrinter{writer: os.Stdout, replay: replay}
-	case "log":
-		return &EventPrinter{writer: &LogWriter{}, replay: replay}
-	default:
-		f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0755)
+	if SuffixHttp.Get(name) != "" {
+		f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0755)
 		if err != nil {
 			log.Fatalln("Cannot open writer ", name)
 		}
-
-		return &EventPrinter{writer: f, replay: replay}
+		return &EventPrinter{writer: f, replay: true}
 	}
+	if SuffixLog.Get(name) != "" {
+		return &EventPrinter{writer: &LogWriter{}, replay: false}
+	}
+
+	if name == "stdout" {
+		return &EventPrinter{writer: os.Stdout, replay: false}
+	}
+
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0755)
+	if err != nil {
+		log.Fatalln("Cannot open writer ", name)
+	}
+	return &EventPrinter{writer: f, replay: false}
+
 }
 
 // PushEvent implements the function of interface EventHandler.
@@ -59,10 +81,7 @@ func (p *EventPrinter) PushEvent(e interface{}) {
 }
 
 // Wait implements the function of interface EventHandler.
-func (p *EventPrinter) Wait() {
-	_ = p.writer.Close()
-}
-
+func (p *EventPrinter) Wait() { _ = p.writer.Close() }
 func WriteRequestTo(replay bool, r RequestEvent, out io.Writer) (n int64, err error) {
 	if replay {
 		n += fp(out, "###\r\n%s %s\r\n", r.Method, r.URI)

@@ -10,28 +10,27 @@ import (
 	"time"
 )
 
-func Run(packetSource *gopacket.PacketSource, outputPcap string, eventChan chan<- interface{}, snapLen int) error {
+func Run(ps *gopacket.PacketSource, outputPcap string, ech chan<- interface{}, snapLen int, onlyRequests bool, onlyMethod string) error {
 	pcapWriter, writerCloser, err := createPcapWriter(outputPcap, snapLen)
 	if err != nil {
 		return err
 	}
 	defer writerCloser()
 
-	factory := NewFactory(eventChan)
+	factory := NewFactory(ech, onlyRequests, onlyMethod)
 	assembler := tcpassembly.NewAssembler(tcpassembly.NewStreamPool(factory))
-	count := loop(assembler, packetSource, pcapWriter)
+	count := loop(assembler, ps, pcapWriter)
 	assembler.FlushAll()
 	log.Println("Read pcap writer complete")
 	factory.Wait()
 	log.Println("Parse complete, packet count: ", count)
 
-	close(eventChan)
+	close(ech)
 	return nil
 }
 
 func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWriter pcapWriterFn) int {
 	count := 0
-	last := time.Now()
 	ticker := time.Tick(5 * time.Second)
 
 	for {
@@ -46,13 +45,11 @@ func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWrite
 				continue
 			}
 
-			info := p.Metadata().CaptureInfo
-			_ = pcapWriter(info, p.Data())
-			assembler.AssembleWithTimestamp(n.NetworkFlow(), t.(*layers.TCP), info.Timestamp)
-			last = info.Timestamp
+			_ = pcapWriter(p.Metadata().CaptureInfo, p.Data())
+			assembler.AssembleWithTimestamp(n.NetworkFlow(), t.(*layers.TCP), p.Metadata().Timestamp)
 			count++
 		case <-ticker:
-			assembler.FlushOlderThan(last.Add(time.Second * -10))
+			assembler.FlushOlderThan(time.Now().Add(time.Second * -10))
 		}
 	}
 }
