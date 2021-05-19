@@ -1,12 +1,11 @@
 package httpstream
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -36,7 +35,7 @@ func (p *EventJson) loop() {
 		select {
 		case v := <-p.Ch:
 			data := createJSON(v)
-			_, _ = f.WriteString(data)
+			_, _ = f.Write(data)
 			_, _ = f.Write([]byte("\n"))
 			count++
 			if count >= batchNum {
@@ -103,19 +102,15 @@ type RequestRecord struct {
 	Body   string            `json:"body"`
 }
 
-func createJSON(v RequestEvent) string {
+func createJSON(v RequestEvent) []byte {
 	for _, n := range []string{"User-Agent", "Host", "Connection", "Transfer-Encoding", "Content-Length"} {
 		v.Header.Del(n)
 	}
 	r := RequestRecord{Method: v.Method, Uri: v.URI, Header: ConvertHeaders(v.Header), Body: string(v.Body)}
-	data, _ := json.Marshal(r)
-	return UnescapeUnicodeCharactersInJSON(string(data))
-}
+	buffer := &bytes.Buffer{}
+	encoder := json.NewEncoder(buffer)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(r)
 
-func UnescapeUnicodeCharactersInJSON(_jsonRaw string) string {
-	str, err := strconv.Unquote(strings.Replace(strconv.Quote(_jsonRaw), `\\u`, `\u`, -1))
-	if err != nil {
-		return _jsonRaw
-	}
-	return str
+	return buffer.Bytes()
 }
