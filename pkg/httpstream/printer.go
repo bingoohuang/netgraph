@@ -7,19 +7,26 @@ import (
 	"strings"
 )
 
-type OutSuffix string
-type OutSuffixes []OutSuffix
-
-const (
-	SuffixHttp OutSuffix = ".http"
-	SuffixPcap OutSuffix = ".pcap"
-	SuffixLog  OutSuffix = ".log"
-	SuffixJson OutSuffix = ".json"
+type (
+	OutSuffix   string
+	OutSuffixes []OutSuffix
 )
 
-func (o OutSuffix) Get(s string) string {
-	if strings.HasSuffix(s, string(o)) {
-		return s
+const (
+	SuffixStdout OutSuffix = "stdout"
+	SuffixStdLog OutSuffix = "log"
+	SuffixHttp   OutSuffix = ".http"
+	SuffixPcap   OutSuffix = ".pcap"
+	SuffixLog    OutSuffix = ".log"
+	SuffixJson   OutSuffix = ".json"
+)
+
+func (o OutSuffix) Find(ss []string) string {
+	for _, s := range ss {
+		so := string(o)
+		if so == s || strings.HasSuffix(s, so) {
+			return s
+		}
 	}
 
 	return ""
@@ -31,8 +38,6 @@ type EventPrinter struct {
 	replay bool
 }
 
-const replayTag = ":replay"
-
 type LogWriter struct{}
 
 func (l LogWriter) Write(p []byte) (n int, err error) {
@@ -42,29 +47,28 @@ func (l LogWriter) Write(p []byte) (n int, err error) {
 
 func (l LogWriter) Close() error { return nil }
 
-// NewEventPrinter creates EventPrinter.
-func NewEventPrinter(name string) *EventPrinter {
-	if SuffixHttp.Get(name) != "" {
-		f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0755)
-		if err != nil {
-			log.Fatalln("Cannot open writer ", name)
-		}
-		return &EventPrinter{writer: f, replay: true}
-	}
-	if SuffixLog.Get(name) != "" {
-		return &EventPrinter{writer: &LogWriter{}, replay: false}
-	}
+func NewEventStdout() *EventPrinter {
+	return &EventPrinter{writer: os.Stdout, replay: false}
+}
 
-	if name == "stdout" {
-		return &EventPrinter{writer: os.Stdout, replay: false}
-	}
-
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0755)
+func NewEventLogFile(name string) *EventPrinter {
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o755)
 	if err != nil {
 		log.Fatalln("Cannot open writer ", name)
 	}
 	return &EventPrinter{writer: f, replay: false}
+}
 
+func NewEventLog() *EventPrinter {
+	return &EventPrinter{writer: &LogWriter{}, replay: false}
+}
+
+func NewEventHttp(name string) *EventPrinter {
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o755)
+	if err != nil {
+		log.Fatalln("Cannot open writer ", name)
+	}
+	return &EventPrinter{writer: f, replay: true}
 }
 
 // PushEvent implements the function of interface EventHandler.
@@ -82,6 +86,7 @@ func (p *EventPrinter) PushEvent(e interface{}) {
 
 // Wait implements the function of interface EventHandler.
 func (p *EventPrinter) Wait() { _ = p.writer.Close() }
+
 func WriteRequestTo(replay bool, r RequestEvent, out io.Writer) (n int64, err error) {
 	if replay {
 		n += fp(out, "###\r\n%s %s\r\n", r.Method, r.URI)

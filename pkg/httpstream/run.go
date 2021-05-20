@@ -1,20 +1,22 @@
 package httpstream
 
 import (
+	"log"
+	"os"
+	"time"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/google/gopacket/tcpassembly"
-	"log"
-	"os"
-	"time"
 )
 
-func Run(ps *gopacket.PacketSource, outputPcap string, ech chan<- interface{}, snapLen int, onlyRequests bool, onlyMethod string) error {
+func Run(ps *gopacket.PacketSource, outputPcap string, ech chan<- interface{}, snapLen int, onlyRequests bool, onlyMethod string) {
 	pcapWriter, writerCloser, err := createPcapWriter(outputPcap, snapLen)
 	if err != nil {
-		return err
+		panic(err)
 	}
+
 	defer writerCloser()
 
 	factory := NewFactory(ech, onlyRequests, onlyMethod)
@@ -26,12 +28,12 @@ func Run(ps *gopacket.PacketSource, outputPcap string, ech chan<- interface{}, s
 	log.Println("Parse complete, packet count: ", count)
 
 	close(ech)
-	return nil
 }
 
 func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWriter pcapWriterFn) int {
 	count := 0
-	ticker := time.Tick(5 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -48,7 +50,7 @@ func loop(assembler *tcpassembly.Assembler, ps *gopacket.PacketSource, pcapWrite
 			_ = pcapWriter(p.Metadata().CaptureInfo, p.Data())
 			assembler.AssembleWithTimestamp(n.NetworkFlow(), t.(*layers.TCP), p.Metadata().Timestamp)
 			count++
-		case <-ticker:
+		case <-ticker.C:
 			assembler.FlushOlderThan(time.Now().Add(time.Second * -10))
 		}
 	}

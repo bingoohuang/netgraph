@@ -5,14 +5,15 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"fmt"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly"
 	"io/ioutil"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/tcpassembly"
 )
 
 type streamKey struct {
@@ -39,6 +40,8 @@ func (s *httpStream) Reassembled(rs []tcpassembly.Reassembly) {
 	if s.bad {
 		return
 	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 	for _, r := range rs {
 		if r.Skip != 0 {
@@ -51,14 +54,14 @@ func (s *httpStream) Reassembled(rs []tcpassembly.Reassembly) {
 		}
 
 		s.bytes += uint64(len(r.Bytes))
-		ticker := time.Tick(time.Second)
+		ticker.Reset(time.Second)
 
 		select {
 		case <-s.reader.stopCh:
 			s.bad = true
 			return
 		case s.reader.src <- NewDataBlock(r.Bytes, r.Seen):
-		case <-ticker:
+		case <-ticker.C:
 			// Sometimes pcap only captured HTTP response with no request!
 			// Let's wait few seconds to avoid dead lock.
 			s.bad = true
@@ -72,8 +75,10 @@ func (s *httpStream) ReassemblyComplete() {
 	close(s.reader.src)
 }
 
-var httpRequestFirstLine = regexp.MustCompile(`^([A-Z]+) (.+) (HTTP/.+)\r\n`)
-var httpResponseFirstLine = regexp.MustCompile(`^(HTTP/.+) (\d{3}) (.+)\r\n`)
+var (
+	httpRequestFirstLine  = regexp.MustCompile(`^([A-Z]+) (.+) (HTTP/.+)\r\n`)
+	httpResponseFirstLine = regexp.MustCompile(`^(HTTP/.+) (\d{3}) (.+)\r\n`)
+)
 
 type Direction int
 

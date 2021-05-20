@@ -1,9 +1,9 @@
 package httpstream
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -26,7 +26,8 @@ func NewEventJson(filename string) *EventJson {
 func (p *EventJson) loop() {
 	batchNum := 1000
 	seq := 0
-	f := createFile(p.filename, &seq)
+	var f *os.File
+
 	tick := time.NewTicker(1 * time.Hour)
 	defer tick.Stop()
 
@@ -34,23 +35,27 @@ func (p *EventJson) loop() {
 	for {
 		select {
 		case v := <-p.Ch:
-			data := createJSON(v)
-			_, _ = f.Write(data)
-			_, _ = f.Write([]byte("\n"))
+			if f == nil {
+				f = createFile(p.filename, &seq)
+			}
+			writeJSON(v, f)
 			count++
 			if count >= batchNum {
 				count = 0
 				_ = f.Close()
-				f = createFile(p.filename, &seq)
+				f = nil
 			}
 		case <-tick.C:
 			if count > 0 {
 				count = 0
 				_ = f.Close()
-				f = createFile(p.filename, &seq)
+				f = nil
 			}
 		case <-p.StopCh:
-			_ = f.Close()
+			if f != nil {
+				_ = f.Close()
+				f = nil
+			}
 			p.StopCh <- struct{}{}
 			return
 		}
@@ -59,8 +64,8 @@ func (p *EventJson) loop() {
 
 func createFile(baseFileName string, seq *int) *os.File {
 	*seq++
-	fn := createFileName(baseFileName, seq, `200601021504`)
-	f, err := os.OpenFile(fn, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0755)
+	fn := createFileName(baseFileName, seq, `2006010215`)
+	f, err := os.OpenFile(fn, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o755)
 	if err != nil {
 		log.Fatalln("Cannot open writer ", fn)
 	}
@@ -96,21 +101,20 @@ func (p *EventJson) Wait() {
 }
 
 type RequestRecord struct {
+	Time   string            `json:"time"`
 	Method string            `json:"method"`
 	Uri    string            `json:"uri"`
 	Header map[string]string `json:"header"`
 	Body   string            `json:"body"`
 }
 
-func createJSON(v RequestEvent) []byte {
+func writeJSON(v RequestEvent, w io.Writer) {
 	for _, n := range []string{"User-Agent", "Host", "Connection", "Transfer-Encoding", "Content-Length"} {
 		v.Header.Del(n)
 	}
-	r := RequestRecord{Method: v.Method, Uri: v.URI, Header: ConvertHeaders(v.Header), Body: string(v.Body)}
-	buffer := &bytes.Buffer{}
-	encoder := json.NewEncoder(buffer)
+	r := RequestRecord{Method: v.Method, Uri: v.URI, Header: ConvertHeaders(v.Header), Body: string(v.Body),
+		Time: v.Start.Format(`2006-01-02 15:04:05.000`)}
+	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	_ = encoder.Encode(r)
-
-	return buffer.Bytes()
 }

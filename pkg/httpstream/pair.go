@@ -230,5 +230,5 @@ func (r Event) writeBody(b *bytes.Buffer) {
 		b.WriteString(fmt.Sprintf("\r\ncontent(%d)", len(r.Body)))
 		b.WriteString(fmt.Sprintf("%s", r.Body))
 	}
-	b.WriteString(fmt.Sprintf("\r\n\r\n"))
+	b.WriteString("\r\n\r\n")
 }

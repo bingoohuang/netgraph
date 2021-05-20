@@ -13,33 +13,26 @@ import (
 func TestNgnet(t *testing.T) {
 	eventChan := make(chan interface{}, 1024)
 	f := NewFactory(eventChan, false, "")
-	pool := tcpassembly.NewStreamPool(f)
-	assembler := tcpassembly.NewAssembler(pool)
+	assembler := tcpassembly.NewAssembler(tcpassembly.NewStreamPool(f))
 	packetCount := 0
 	fmt.Println("Run")
 
-	handle, err := pcap.OpenOffline("testdata/dump.pcapng")
+	handle, err := pcap.OpenOffline("testdata/dump.pcap")
 	if err != nil {
 		panic(err)
 	}
 
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.Packets() {
-		netLayer := packet.NetworkLayer()
-		transLayer := packet.TransportLayer()
-
-		if netLayer == nil {
-			continue
-		}
-		if transLayer == nil {
+	ps := gopacket.NewPacketSource(handle, handle.LinkType())
+	for p := range ps.Packets() {
+		n, t := p.NetworkLayer(), p.TransportLayer()
+		if n == nil || t == nil || t.LayerType() != layers.LayerTypeTCP {
 			continue
 		}
 		packetCount++
-		tcp, _ := transLayer.(*layers.TCP)
-		assembler.AssembleWithTimestamp(netLayer.NetworkFlow(), tcp, packet.Metadata().CaptureInfo.Timestamp)
+		assembler.AssembleWithTimestamp(n.NetworkFlow(), t.(*layers.TCP), p.Metadata().CaptureInfo.Timestamp)
 	}
 
 	assembler.FlushAll()
 	f.Wait()
-	fmt.Println("packet:", packetCount, "http:", len(eventChan))
+	fmt.Println("p:", packetCount, "http:", len(eventChan))
 }
